@@ -5,15 +5,19 @@ load_dotenv()
 
 API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
 
-SYMBOL = os.getenv("STOCK_SYMBOL", "IBM")
+# Comma-separated list, e.g. STOCK_SYMBOLS=IBM,AAPL,MSFT
+SYMBOLS = [
+    s.strip().upper()
+    for s in os.getenv("STOCK_SYMBOLS", "IBM").split(",")
+    if s.strip()
+]
+
+# "compact" = last ~100 trading days, "full" = 20+ years of history
+OUTPUT_SIZE = os.getenv("OUTPUT_SIZE", "compact")
 
 BASE_URL = "https://www.alphavantage.co/query"
 
-API_URL = (
-    f"{BASE_URL}"
-    f"?function=TIME_SERIES_DAILY"
-    f"&symbol={SYMBOL}"
-    f"&apikey={API_KEY}"
-)
+# Free tier allows 5 requests/minute
+API_DELAY_SECONDS = int(os.getenv("API_DELAY_SECONDS", "13"))
 
-CSV_OUTPUT_PATH = f"data/processed/{SYMBOL.lower()}_stock_data.csv"
+CHART_OUTPUT_DIR = "visualization/output"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from datetime import timedelta
 
@@ -10,10 +11,17 @@ from airflow.providers.standard.operators.python import PythonOperator
 
 PROJECT_ROOT = "/opt/airflow/project"
 
+# Edit this list (or set STOCK_SYMBOLS in .env) to add tickers
+SYMBOLS = [
+    s.strip().upper()
+    for s in os.getenv("STOCK_SYMBOLS", "IBM").split(",")
+    if s.strip()
+]
 
-def run_financial_etl() -> None:
+
+def run_financial_etl(symbol: str) -> None:
     result = subprocess.run(
-        ["python", "-m", "src.main"],
+        ["python", "-m", "src.main", "--symbol", symbol],
         cwd=PROJECT_ROOT,
         capture_output=True,
         text=True,
@@ -60,7 +68,14 @@ with DAG(
     tags=["python", "etl", "stocks"],
 ) as dag:
 
-    run_pipeline = PythonOperator(
-        task_id="run_financial_etl",
-        python_callable=run_financial_etl,
-    )
+    previous = None
+    for symbol in SYMBOLS:
+        task = PythonOperator(
+            task_id=f"etl_{symbol.lower()}",
+            python_callable=run_financial_etl,
+            op_kwargs={"symbol": symbol},
+        )
+        # run sequentially to stay within the API rate limit
+        if previous:
+            previous >> task
+        previous = task

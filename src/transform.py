@@ -1,66 +1,37 @@
 import pandas as pd
 
+COLUMN_MAP = {
+    "1. open": "open_price",
+    "2. high": "high_price",
+    "3. low": "low_price",
+    "4. close": "close_price",
+    "5. volume": "volume",
+}
 
-def transform_stock_data(data: dict) -> pd.DataFrame:
+
+def transform_stock_data(data: dict, symbol: str) -> pd.DataFrame:
+    """Turn the raw API response into a clean DataFrame.
+
+    Columns: date, symbol, open_price, high_price, low_price, close_price,
+    volume, daily_return (% change of close), ma20 (20-day moving average).
     """
-    Transform raw API response into a clean Pandas DataFrame.
 
-    Args:
-        data (dict): JSON response from Alpha Vantage.
+    df = pd.DataFrame(data["Time Series (Daily)"]).T.rename(columns=COLUMN_MAP)
+    df = df[list(COLUMN_MAP.values())].apply(pd.to_numeric, errors="coerce")
 
-    Returns:
-        pd.DataFrame: Clean stock DataFrame.
-    """
-
-    # Extract Time Series
-    time_series = data["Time Series (Daily)"]
-
-    # Dictionary → DataFrame
-    df = pd.DataFrame(time_series).T
-
-    # Rename Columns
-    df.columns = [
-        "Open",
-        "High",
-        "Low",
-        "Close",
-        "Volume"
-    ]
-
-    # Convert Data Types
-    numeric_columns = [
-        "Open",
-        "High",
-        "Low",
-        "Close",
-        "Volume"
-    ]
-
-    for column in numeric_columns:
-        df[column] = pd.to_numeric(df[column], errors="coerce")
-
-    # Convert Index to Datetime
     df.index = pd.to_datetime(df.index)
-
-    # Name the Index
-    df = df.rename(columns={
-    "Open": "open_price",
-    "High": "high_price",
-    "Low": "low_price",
-    "Close": "close_price",
-    "Volume": "volume"
-    })
-
-    df.index.name = "trade_date"
-
-    # Sort by Date
+    df.index.name = "date"
     df = df.sort_index()
 
-    # Remove Duplicate Dates
-    df = df.drop_duplicates()
+    # Drop duplicate dates (not duplicate values) and invalid rows
+    df = df[~df.index.duplicated(keep="last")].dropna()
 
-    # Remove rows containing invalid values
-    df = df.dropna()
-    df = df.reset_index()
-    df.rename(columns={"trade_date": "date"}, inplace=True)
-    return df
+    # Basic sanity checks on prices
+    df = df[(df[["open_price", "high_price", "low_price", "close_price"]] > 0).all(axis=1)]
+    df = df[df["high_price"] >= df["low_price"]]
+
+    df["daily_return"] = df["close_price"].pct_change().mul(100).round(4)
+    df["ma20"] = df["close_price"].rolling(window=20).mean().round(2)
+
+    df.insert(0, "symbol", symbol)
+    return df.reset_index()

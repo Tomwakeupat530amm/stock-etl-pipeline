@@ -1,46 +1,50 @@
+import argparse
+import sys
+import time
+
+from src.config import API_DELAY_SECONDS, SYMBOLS
 from src.extract import extract_stock_data
-from src.transform import transform_stock_data
-from src.load import load_to_postgres
+from src.load import ensure_table, load_to_postgres
 from src.logger import logger
-
-from visualization.charts import (
-    create_closing_price_chart,
-    create_volume_chart,
-    create_moving_average_chart,
-    create_histogram,
-    create_boxplot,
-    create_correlation_heatmap,
-)
+from src.transform import transform_stock_data
+from visualization.charts import generate_all_charts
 
 
-def main():
+def run_symbol(symbol: str) -> None:
+    raw = extract_stock_data(symbol)
+    df = transform_stock_data(raw, symbol)
+    logger.info(f"[{symbol}] Transformed {len(df)} rows")
+    load_to_postgres(df)
+    generate_all_charts(df, symbol)
 
-    logger.info("ETL Pipeline Started")
 
-    try:
-        raw_data = extract_stock_data()
-        logger.info("Data Extracted Successfully")
+def main(symbols=None) -> None:
+    symbols = symbols or SYMBOLS
+    logger.info(f"ETL started for: {', '.join(symbols)}")
 
-        df = transform_stock_data(raw_data)
-        logger.info("Data Transformed Successfully")
+    ensure_table()
 
-        load_to_postgres(df)
-        logger.info("Data Loaded Successfully")
+    failed = []
+    for i, symbol in enumerate(symbols):
+        if i:
+            time.sleep(API_DELAY_SECONDS)  # respect API rate limit
+        try:
+            run_symbol(symbol)
+            logger.info(f"[{symbol}] OK")
+        except Exception as e:
+            logger.exception(f"[{symbol}] FAILED: {e}")
+            failed.append(symbol)
 
-        create_closing_price_chart(df)
-        create_volume_chart(df)
-        create_moving_average_chart(df)
-        create_histogram(df)
-        create_boxplot(df)
-        create_correlation_heatmap(df)
-
-        logger.info("Charts Generated Successfully")
-        logger.info("ETL Pipeline Finished Successfully")
-
-    except Exception as e:
-        logger.exception(f"ETL Pipeline Failed: {e}")
-        raise
+    if failed:
+        raise RuntimeError(f"ETL failed for: {', '.join(failed)}")
+    logger.info("ETL finished successfully")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Stock ETL pipeline")
+    parser.add_argument("--symbol", "-s", nargs="+", help="override STOCK_SYMBOLS")
+    args = parser.parse_args()
+    try:
+        main([s.upper() for s in args.symbol] if args.symbol else None)
+    except Exception:
+        sys.exit(1)

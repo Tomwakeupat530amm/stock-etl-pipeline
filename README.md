@@ -1,238 +1,59 @@
 # stock-etl-pipeline
 
-An end-to-end financial data engineering pipeline that extracts daily stock market data from the Alpha Vantage API, transforms and validates the data using Python and Pandas, loads it into PostgreSQL, generates analytical visualizations, and orchestrates the complete workflow using Apache Airflow running in Docker.
+**English** | [Tiếng Việt](README.vi.md)
 
-## Project Overview
+An end-to-end stock-market ETL pipeline. It pulls daily prices for one or more tickers from the Alpha Vantage API, cleans and enriches them with Pandas, upserts them into PostgreSQL, generates charts, and is scheduled by Apache Airflow running in Docker.
 
-This project demonstrates a production-style ETL workflow for financial market data.
+## Features
 
-The pipeline performs the following operations:
-
-1. Extracts daily stock market data from the Alpha Vantage REST API.
-2. Converts the API JSON response into a structured Pandas DataFrame.
-3. Cleans and validates financial data.
-4. Converts columns into appropriate numeric and datetime data types.
-5. Removes invalid and duplicate records.
-6. Loads transformed data into PostgreSQL.
-7. Prevents duplicate database records using idempotent inserts.
-8. Generates financial data visualizations.
-9. Orchestrates and schedules the complete pipeline using Apache Airflow.
-10. Runs the Airflow environment using Docker Compose.
+- **Multi-symbol**: configure any number of tickers (`STOCK_SYMBOLS=IBM,AAPL,MSFT`).
+- **Enriched data**: daily return (%) and 20-day moving average are computed in the transform step.
+- **Validation**: invalid numbers, non-positive prices, `high < low` and duplicate dates are removed.
+- **Idempotent upsert**: bulk `INSERT ... ON CONFLICT (symbol, trade_date) DO UPDATE`, so reruns never duplicate rows and corrected data overwrites old values.
+- **Self-provisioning**: the target table is created automatically on first run.
+- **One Airflow task per symbol**, run sequentially to respect the API rate limit; one failing symbol does not stop the others.
+- **Charts per symbol** saved in `visualization/output/<SYMBOL>/`: closing price, volume, moving average, daily-return histogram, box plot, correlation heatmap.
 
 ## Architecture
 
 ```text
-                    Alpha Vantage API
-                           |
-                           v
-                    Python Extraction
-                           |
-                           v
-                    Pandas Transform
-                           |
-                           v
-                     PostgreSQL
-                           |
-                           v
-                Financial Visualizations
+Alpha Vantage API -> extract.py -> transform.py -> load.py (PostgreSQL)
+                                        |
+                                        +-> visualization/charts.py (PNG)
 
-                           ^
-                           |
-                   Apache Airflow
-                           |
-                           v
-                    Docker Compose
+Airflow DAG (daily 22:00 Asia/Ho_Chi_Minh): etl_ibm >> etl_aapl >> ...
+   each task runs: python -m src.main --symbol <SYMBOL>
 ```
 
-## Technology Stack
-
-| Technology | Purpose |
-|---|---|
-| Python | Core ETL development |
-| Pandas | Data transformation and cleaning |
-| Requests | REST API integration |
-| PostgreSQL | Financial data storage |
-| SQLAlchemy | Database connectivity |
-| Matplotlib | Financial visualizations |
-| Seaborn | Correlation heatmap |
-| Apache Airflow | Workflow orchestration and scheduling |
-| Docker | Containerized Airflow environment |
-| Docker Compose | Multi-container orchestration |
-| Alpha Vantage API | Financial market data source |
-
-## Project Structure
+## Project structure
 
 ```text
 stock-etl-pipeline/
-│
-├── airflow/
-│   ├── dags/
-│   │   └── financial_etl_dag.py
-│   ├── config/
-│   └── plugins/
-│
+├── airflow/dags/financial_etl_dag.py   # DAG: one task per symbol
 ├── src/
-│   ├── __init__.py
-│   ├── config.py
-│   ├── database.py
-│   ├── extract.py
-│   ├── transform.py
-│   ├── load.py
+│   ├── config.py      # env-based settings
+│   ├── database.py    # SQLAlchemy engine
+│   ├── extract.py     # Alpha Vantage client
+│   ├── transform.py   # cleaning, validation, return & MA20
+│   ├── load.py        # table creation + bulk upsert
 │   ├── logger.py
-│   └── main.py
-│
-├── visualization/
-│   ├── __init__.py
-│   ├── charts.py
-│   └── output/
-│
-├── sql/
-│   └── create_tables.sql
-│
+│   └── main.py        # CLI entry point
+├── visualization/charts.py
+├── sql/create_tables.sql
 ├── Dockerfile
 ├── docker-compose.yaml
 ├── requirements.txt
-├── .env.example
-├── .gitignore
-└── README.md
+└── .env.example
 ```
 
-## ETL Pipeline
+## Configuration
 
-### 1. Extract
-
-The extraction layer retrieves daily stock market data from the Alpha Vantage API.
-
-The API response contains daily:
-
-- Open price
-- High price
-- Low price
-- Close price
-- Trading volume
-
-API credentials are stored using environment variables rather than hardcoded into the application.
-
-### 2. Transform
-
-The transformation layer converts the raw JSON response into a clean Pandas DataFrame.
-
-Transformations include:
-
-- JSON-to-DataFrame conversion
-- Column renaming
-- Numeric type conversion
-- Datetime conversion
-- Date sorting
-- Duplicate removal
-- Null-value removal
-- Financial field normalization
-
-The final dataset contains:
-
-```text
-date
-open_price
-high_price
-low_price
-close_price
-volume
-```
-
-### 3. Load
-
-The transformed data is loaded into PostgreSQL using SQLAlchemy.
-
-The database layer uses conflict handling to make repeated pipeline executions idempotent.
-
-```sql
-ON CONFLICT (trade_date)
-DO NOTHING;
-```
-
-Therefore, rerunning the pipeline does not create duplicate records for dates already stored in the database.
-
-## Data Visualizations
-
-The pipeline automatically generates:
-
-- Closing Price Line Chart
-- Daily Trading Volume Chart
-- 20-Day Moving Average Chart
-- Closing Price Histogram
-- Closing Price Box Plot
-- Correlation Heatmap
-
-Generated visualizations are stored in:
-
-```text
-visualization/output/
-```
-
-## Apache Airflow Orchestration
-
-Apache Airflow orchestrates execution of the financial ETL pipeline.
-
-DAG:
-
-```text
-financial_etl_pipeline
-```
-
-The DAG executes the Python ETL application and monitors its execution state.
-
-The pipeline can be:
-
-- Triggered manually from the Airflow UI
-- Executed automatically according to its configured schedule
-- Monitored through Airflow task logs
-- Retried automatically when failures occur
-
-The DAG is configured with retry handling so transient failures can be retried automatically.
-
-## Scheduling
-
-The DAG is configured to run daily at:
-
-```text
-22:00 Asia/Ho_Chi_Minh
-```
-
-Cron expression:
-
-```text
-0 22 * * *
-```
-
-Manual DAG runs can also be triggered at any time independently of the automatic schedule.
-
-## Docker Architecture
-
-Apache Airflow runs using Docker Compose.
-
-The environment contains services such as:
-
-```text
-Airflow API Server
-Airflow Scheduler
-Airflow DAG Processor
-Airflow Worker
-Airflow Triggerer
-PostgreSQL
-Redis
-```
-
-The project source directory is bind-mounted into the Airflow containers so source-code changes can be used without manually copying files into containers.
-
-## Environment Variables
-
-Copy `.env.example` to `.env` as a template.
-
-Example:
+Copy `.env.example` to `.env`:
 
 ```env
 ALPHA_VANTAGE_API_KEY=your_api_key
-STOCK_SYMBOL=IBM
+STOCK_SYMBOLS=IBM,AAPL,MSFT
+OUTPUT_SIZE=compact          # compact = ~100 days, full = 20+ years
 
 DB_HOST=host.docker.internal
 DB_PORT=5432
@@ -241,129 +62,44 @@ DB_USER=postgres
 DB_PASSWORD=your_password
 
 AIRFLOW_UID=50000
-FERNET_KEY=
+FERNET_KEY=                  # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-The real `.env` file is excluded from Git using `.gitignore`.
+The free Alpha Vantage tier is limited (about 5 requests/minute and a small daily quota), so keep the symbol list short. `API_DELAY_SECONDS` (default 13) controls the pause between symbols.
 
-## Running the Project
+## Usage
 
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/Tomwakeupat530amm/stock-etl-pipeline.git
-cd stock-etl-pipeline
-```
-
-### 2. Configure environment variables
-
-Create `.env` from `.env.example` and provide the required credentials.
-
-### 2b. Create the database table
-
-Create the `stock_market` database in PostgreSQL, then run `sql/create_tables.sql` against it.
-
-### 3. Initialize Airflow
+### With Airflow (Docker)
 
 ```bash
 docker compose up airflow-init
-```
-
-### 4. Start Airflow
-
-```bash
 docker compose up -d
 ```
 
-### 5. Check container health
+Open http://localhost:8080 (default login `airflow` / `airflow`), enable `financial_etl_pipeline` and trigger it, or wait for the 22:00 schedule. Create the `stock_market` database in PostgreSQL beforehand; the table is created automatically.
+
+Stop with `docker compose down`.
+
+### Without Airflow
 
 ```bash
-docker compose ps
+pip install -r requirements.txt
+python -m src.main                      # uses STOCK_SYMBOLS
+python -m src.main --symbol NVDA TSLA   # override symbols
 ```
 
-### 6. Open Airflow
+### Query the data
 
-Open the Airflow web interface on port `8080`.
-
-Find:
-
-```text
-financial_etl_pipeline
+```sql
+SELECT symbol, trade_date, close_price, daily_return
+FROM daily_stock_prices
+WHERE symbol = 'IBM'
+ORDER BY trade_date DESC
+LIMIT 10;
 ```
 
-Enable the DAG and trigger it manually or allow the configured schedule to execute it.
+## Notes
 
-### 7. Stop the environment
-
-```bash
-docker compose down
-```
-
-## Running the ETL Without Airflow
-
-The ETL application can also be executed directly:
-
-```bash
-python -m src.main
-```
-
-This is useful for local development and debugging.
-
-## Error Handling and Logging
-
-The application uses structured logging throughout the ETL pipeline.
-
-Failures during extraction, transformation, database loading, or visualization generation are propagated to Airflow so failed pipeline executions are correctly marked as failed.
-
-Airflow additionally provides:
-
-- Task execution logs
-- DAG run history
-- Retry handling
-- Task state monitoring
-- Failure visibility
-
-## Key Data Engineering Concepts Demonstrated
-
-This project demonstrates:
-
-- ETL pipeline design
-- REST API ingestion
-- JSON processing
-- Pandas transformations
-- Data validation
-- PostgreSQL persistence
-- SQLAlchemy database integration
-- Idempotent data loading
-- Workflow orchestration
-- DAG scheduling
-- Retry and failure handling
-- Environment-variable based configuration
-- Containerization
-- Docker Compose
-- Logging and monitoring
-- Financial data visualization
-
-## Future Enhancements
-
-Potential improvements include:
-
-- Multi-stock ingestion
-- Incremental API extraction
-- Separate Airflow tasks for Extract, Transform, Load and visualization
-- Airflow XCom usage
-- Data quality validation tasks
-- Stock symbol configuration
-- Parallel stock processing
-- Kafka-based streaming market data ingestion
-- Redis caching
-- TimescaleDB integration
-- PySpark processing
-- Cloud deployment
-- CI/CD using GitHub Actions
-- Prometheus and Grafana monitoring
-- Automated tests with Pytest
-
-## Disclaimer
-
-This project is intended for educational and portfolio purposes. Market data provided by external APIs may be delayed or subject to provider limitations and should not be treated as investment advice.
+- Educational project; market data may be delayed and is not investment advice.
+- Airflow's generated `airflow.cfg` files contain secrets and are git-ignored.
+- Default Airflow credentials and JWT secret in `docker-compose.yaml` are for local development only.
