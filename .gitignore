@@ -1,0 +1,38 @@
+# Secrets / environment variables
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Airflow runtime files
+airflow/logs/
+airflow/airflow.cfg
+airflow/webserver_config.py
+
+# Project runtime logs
+logs/
+*.log
+
+# Generated data
+data/raw/
+data/processed/
+
+# Generated charts
+visualization/output/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Auto-generated Airflow configs (contain generated secrets)
+config/airflow.cfg
+airflow/config/airflow.cfg
